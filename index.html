@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <title>Vyla Player Pro</title>
 
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/artplayer/dist/artplayer.css">
 <script src="https://cdn.jsdelivr.net/npm/artplayer/dist/artplayer.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 
@@ -25,22 +24,8 @@ body {
 #player {
   width:100%;
   height:500px;
-  background:black;
   border-radius:12px;
   overflow:hidden;
-}
-
-.controls {
-  margin-top:15px;
-  padding:10px;
-}
-
-select {
-  background:#1e293b;
-  color:white;
-  border:none;
-  padding:6px;
-  border-radius:6px;
 }
 </style>
 </head>
@@ -49,15 +34,7 @@ select {
 
 <div class="container">
   <h2>🎬 Vyla Player</h2>
-
   <div id="player"></div>
-
-  <div class="controls">
-    <label>Quality:</label>
-    <select id="quality">
-      <option value="-1">Auto</option>
-    </select>
-  </div>
 </div>
 
 <script>
@@ -70,7 +47,7 @@ const season = params.get("season") || 1;
 const episode = params.get("episode") || 1;
 
 if (!id) {
-  document.body.innerHTML = "<h2 style='text-align:center'>❌ Missing ID</h2>";
+  document.body.innerHTML = "Missing ID";
   throw new Error("Missing ID");
 }
 
@@ -87,84 +64,65 @@ let currentIndex = 0;
 fetch(url)
   .then(r => r.json())
   .then(data => {
-    if (!data.sources?.length) throw new Error("No sources found");
-
     sources = data.sources;
     loadSource(0);
-  })
-  .catch(err => {
-    document.body.innerHTML = `<h2 style="text-align:center">${err.message}</h2>`;
   });
-
-// QUALITY SETUP (YOUR FIXED LOGIC)
-function setupQualitySelector(hls, selectEl) {
-
-  hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
-
-    selectEl.innerHTML = '<option value="-1">Auto</option>';
-
-    data.levels.forEach((level, i) => {
-      const opt = document.createElement('option');
-      opt.value = i;
-      opt.textContent =
-        (level.height ? level.height + 'p' : 'Auto') +
-        ' (' + Math.round(level.bitrate / 1000) + 'kbps)';
-
-      selectEl.appendChild(opt);
-    });
-
-    selectEl.onchange = () => {
-      const val = parseInt(selectEl.value);
-      hls.currentLevel = val;
-    };
-  });
-
-  hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => {
-    if (hls.autoLevelEnabled) {
-      selectEl.value = '-1';
-    } else {
-      selectEl.value = data.level;
-    }
-  });
-}
 
 // LOAD SOURCE
 function loadSource(index) {
   currentIndex = index;
 
-  if (hls) {
-    hls.destroy();
-    hls = null;
-  }
+  if (hls) hls.destroy();
+  if (art) art.destroy();
 
   const stream = BASE + sources[index].url;
-
-  if (art) art.destroy();
 
   art = new Artplayer({
     container: '#player',
     url: stream,
     autoplay: true,
     fullscreen: true,
-    setting: true,
+    setting: true, // 🔥 IMPORTANT
   });
 
   const video = art.video;
-  const qualitySelect = document.getElementById("quality");
 
   if (Hls.isSupported()) {
-
     hls = new Hls({
       enableWorker: true,
-      lowLatencyMode: true
+      lowLatencyMode: true,
     });
 
     hls.loadSource(stream);
     hls.attachMedia(video);
 
-    setupQualitySelector(hls, qualitySelect);
+    // 🔥 QUALITY INSIDE ARTPLAYER SETTINGS MENU
+    hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
 
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      const levels = [
+        { html: 'Auto', value: -1 }
+      ];
+
+      data.levels.forEach((level, i) => {
+        levels.push({
+          html: level.height ? level.height + 'p' : 'Auto',
+          value: i
+        });
+      });
+
+      art.update({
+        settings: [
+          {
+            html: 'Quality',
+            selector: levels,
+            onSelect: (item) => {
+              hls.currentLevel = item.value;
+              return item.html;
+            }
+          }
+        ]
+      });
+
       video.play().catch(() => {});
     });
 
@@ -174,7 +132,7 @@ function loadSource(index) {
       }
     });
 
-  } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+  } else {
     video.src = stream;
   }
 }
