@@ -2,123 +2,81 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Vyla Player Pro</title>
+<title>Vyla Player (Plyr)</title>
 
+<!-- Plyr -->
+<link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+<script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
+
+<!-- HLS -->
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 
 <style>
 body {
   margin:0;
-  background: linear-gradient(135deg, #0f172a, #020617);
-  font-family: system-ui;
-  color: #fff;
+  background:#0f172a;
+  font-family:system-ui;
+  color:white;
 }
 
-.player-container {
-  max-width: 900px;
-  margin: auto;
-  padding: 20px;
+.container {
+  max-width:900px;
+  margin:auto;
+  padding:20px;
 }
 
-video {
-  width: 100%;
-  border-radius: 12px;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.6);
-  background: black;
-}
-
-.controls {
-  margin-top: 15px;
-  padding: 15px;
-  background: rgba(255,255,255,0.05);
-  border-radius: 12px;
-  backdrop-filter: blur(10px);
+#sources {
+  margin-top:15px;
 }
 
 button {
-  background: #1e293b;
-  border: none;
-  color: #fff;
-  padding: 8px 14px;
-  margin: 4px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: 0.2s;
-}
-
-button:hover {
-  background: #334155;
+  background:#1e293b;
+  border:none;
+  color:white;
+  padding:8px 12px;
+  margin:4px;
+  border-radius:6px;
+  cursor:pointer;
 }
 
 button.active {
-  background: #22c55e;
-}
-
-select {
-  background: #1e293b;
-  color: #fff;
-  border: none;
-  padding: 6px;
-  border-radius: 6px;
+  background:#22c55e;
 }
 </style>
 </head>
 
 <body>
 
-<div class="player-container">
+<div class="container">
   <h2>🎬 Vyla Player</h2>
 
-  <video id="video" controls></video>
+  <video id="video" playsinline controls></video>
 
-  <div class="controls">
-    <div id="sources"></div>
-
-    <br>
-
-    <label>Quality:</label>
-    <select id="quality">
-      <option value="-1">Auto</option>
-    </select>
-
-    <br><br>
-
-    <label>Subtitles:</label>
-    <input type="file" id="subtitleUpload" accept=".vtt">
-  </div>
+  <div id="sources"></div>
 </div>
 
 <script>
 const BASE = "https://vyla-api.pages.dev";
 
-// GET PARAMS
 const params = new URLSearchParams(location.search);
-const tmdbId = params.get("id");
+const id = params.get("id");
 const isTv = params.get("type") === "tv";
 const season = params.get("season") || 1;
 const episode = params.get("episode") || 1;
 
-// VALIDATION (NO DEFAULT 550)
-if (!tmdbId) {
-  document.body.innerHTML = `
-    <div style="display:flex;justify-content:center;align-items:center;height:100vh;">
-      <h2>❌ Missing TMDB ID</h2>
-    </div>
-  `;
-  throw new Error("Missing TMDB ID");
+if (!id) {
+  document.body.innerHTML = "<h2 style='text-align:center'>❌ Missing TMDB ID</h2>";
+  throw new Error("Missing ID");
 }
 
-// API URL
 const url = isTv
-  ? `${BASE}/api/tv?id=${tmdbId}&season=${season}&episode=${episode}`
-  : `${BASE}/api/movie?id=${tmdbId}`;
+  ? `${BASE}/api/tv?id=${id}&season=${season}&episode=${episode}`
+  : `${BASE}/api/movie?id=${id}`;
 
-// ELEMENTS
 const video = document.getElementById("video");
 const sourcesDiv = document.getElementById("sources");
-const qualitySelect = document.getElementById("quality");
-const subtitleUpload = document.getElementById("subtitleUpload");
 
+let player = new Plyr(video);
 let hls = null;
 let sources = [];
 
@@ -126,21 +84,18 @@ let sources = [];
 fetch(url)
   .then(r => r.json())
   .then(data => {
-    if (!data.sources || !data.sources.length) {
-      throw new Error("No sources available");
-    }
+    if (!data.sources?.length) throw new Error("No sources");
 
     sources = data.sources;
-
-    createSourceButtons();
+    createButtons();
     loadSource(0);
   })
   .catch(err => {
     document.body.innerHTML = `<h2 style="text-align:center">${err.message}</h2>`;
   });
 
-// CREATE SOURCE BUTTONS
-function createSourceButtons() {
+// SOURCE BUTTONS
+function createButtons() {
   sourcesDiv.innerHTML = "";
 
   sources.forEach((s, i) => {
@@ -168,30 +123,39 @@ function loadSource(index) {
     hls = null;
   }
 
-  const streamUrl = BASE + sources[index].url;
+  const stream = BASE + sources[index].url;
 
   if (Hls.isSupported()) {
     hls = new Hls();
-    hls.loadSource(streamUrl);
+    hls.loadSource(stream);
     hls.attachMedia(video);
 
-    // QUALITY FIX
-    hls.on(Hls.Events.MANIFEST_LOADED, () => {
-      const levels = hls.levels;
-
-      qualitySelect.innerHTML = '<option value="-1">Auto</option>';
-
-      levels.forEach((l, i) => {
-        const label = l.height
-          ? `${l.height}p`
-          : `${Math.round(l.bitrate / 1000)} kbps`;
-
-        qualitySelect.innerHTML += `<option value="${i}">${label}</option>`;
-      });
-    });
-
+    // 🔥 FIX QUALITY INSIDE PLYR
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      video.play().catch(() => {});
+      const levels = hls.levels.map((l, i) => ({
+        label: l.height ? l.height + "p" : Math.round(l.bitrate/1000) + " kbps",
+        value: i
+      }));
+
+      // Inject into Plyr settings
+      player.options.quality = {
+        default: -1,
+        options: [-1, ...levels.map(l => l.value)],
+        forced: true,
+        onChange: (q) => {
+          if (q === -1) {
+            hls.currentLevel = -1;
+          } else {
+            hls.currentLevel = q;
+          }
+        }
+      };
+
+      // Reload Plyr UI
+      player.destroy();
+      player = new Plyr(video);
+
+      video.play().catch(()=>{});
     });
 
     // AUTO FAILOVER
@@ -202,32 +166,9 @@ function loadSource(index) {
     });
 
   } else {
-    video.src = streamUrl;
+    video.src = stream;
   }
 }
-
-// QUALITY CHANGE
-qualitySelect.onchange = () => {
-  if (hls) {
-    hls.currentLevel = Number(qualitySelect.value);
-  }
-};
-
-// SUBTITLE UPLOAD
-subtitleUpload.onchange = (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-
-  const url = URL.createObjectURL(file);
-
-  const track = document.createElement("track");
-  track.kind = "subtitles";
-  track.label = file.name;
-  track.src = url;
-  track.default = true;
-
-  video.appendChild(track);
-};
 </script>
 
 </body>
