@@ -5,10 +5,8 @@
 <title>Vyla Player Pro</title>
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/artplayer/dist/artplayer.css">
-
 <script src="https://cdn.jsdelivr.net/npm/artplayer/dist/artplayer.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-<script src="https://cdn.jsdelivr.net/npm/artplayer-plugin-hls-control/dist/artplayer-plugin-hls-control.js"></script>
 
 <style>
 body {
@@ -19,7 +17,7 @@ body {
 }
 
 .container {
-  max-width:1000px;
+  max-width:900px;
   margin:auto;
   padding:20px;
 }
@@ -27,27 +25,21 @@ body {
 #player {
   width:100%;
   height:520px;
+  background:black;
   border-radius:12px;
   overflow:hidden;
-  background:black;
 }
 
-#sources {
+.controls {
   margin-top:15px;
 }
 
-button {
+select {
   background:#1e293b;
-  border:none;
   color:white;
-  padding:8px 12px;
-  margin:4px;
+  border:none;
+  padding:6px;
   border-radius:6px;
-  cursor:pointer;
-}
-
-button.active {
-  background:#22c55e;
 }
 </style>
 </head>
@@ -55,10 +47,16 @@ button.active {
 <body>
 
 <div class="container">
-  <h2>🎬 Vyla Player (Pro)</h2>
+  <h2>🎬 Vyla Player</h2>
 
   <div id="player"></div>
-  <div id="sources"></div>
+
+  <div class="controls">
+    <label>Quality:</label>
+    <select id="quality">
+      <option value="-1">Auto</option>
+    </select>
+  </div>
 </div>
 
 <script>
@@ -66,124 +64,93 @@ const BASE = "https://vyla-api.pages.dev";
 
 const params = new URLSearchParams(location.search);
 const id = params.get("id");
-const type = params.get("type");
-const season = params.get("season") || 1;
-const episode = params.get("episode") || 1;
 
 if (!id) {
-  document.body.innerHTML = "<h2 style='text-align:center'>❌ Missing ID</h2>";
+  document.body.innerHTML = "Missing ID";
   throw new Error("Missing ID");
 }
 
-// API
-const url = type === "tv"
-  ? `${BASE}/api/tv?id=${id}&season=${season}&episode=${episode}`
-  : `${BASE}/api/movie?id=${id}`;
+const url = `${BASE}/api/movie?id=${id}`;
 
-let sources = [];
-let currentIndex = 0;
 let art;
+let hls;
 
-// FETCH SOURCES
+// FETCH SOURCE
 fetch(url)
   .then(r => r.json())
   .then(data => {
-    if (!data.sources?.length) throw new Error("No sources found");
-
-    sources = data.sources;
-
-    createButtons();
-    loadSource(0);
-  })
-  .catch(err => {
-    document.body.innerHTML = `<h2 style="text-align:center">${err.message}</h2>`;
+    const stream = BASE + data.sources[0].url;
+    initPlayer(stream);
   });
 
-// SOURCE BUTTONS
-function createButtons() {
-  const div = document.getElementById("sources");
-  div.innerHTML = "";
+// QUALITY FUNCTION (YOUR LOGIC FIXED)
+function setupQualitySelector(hls, selectEl) {
 
-  sources.forEach((s, i) => {
-    const btn = document.createElement("button");
-    btn.innerText = s.label;
+  hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
 
-    btn.onclick = () => {
-      document.querySelectorAll("#sources button")
-        .forEach(b => b.classList.remove("active"));
+    selectEl.innerHTML = '<option value="-1">Auto</option>';
 
-      btn.classList.add("active");
-      loadSource(i);
+    data.levels.forEach((level, i) => {
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent =
+        (level.height ? level.height + 'p' : 'Auto') +
+        ` (${Math.round(level.bitrate / 1000)}kbps)`;
+
+      selectEl.appendChild(opt);
+    });
+
+    selectEl.onchange = () => {
+      hls.currentLevel = parseInt(selectEl.value);
     };
+  });
 
-    if (i === 0) btn.classList.add("active");
-
-    div.appendChild(btn);
+  hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => {
+    if (hls.autoLevelEnabled) {
+      selectEl.value = '-1';
+    } else {
+      selectEl.value = data.level;
+    }
   });
 }
 
-// LOAD PLAYER
-function loadSource(index) {
-  currentIndex = index;
-
-  const stream = BASE + sources[index].url;
-
-  if (art) art.destroy();
+// PLAYER INIT
+function initPlayer(streamUrl) {
 
   art = new Artplayer({
     container: '#player',
-    url: stream,
+    url: streamUrl,
     autoplay: true,
     fullscreen: true,
     setting: true,
-
-    plugins: [
-      artplayerPluginHlsControl({
-        quality: {
-          control: true,
-          setting: true,
-          title: 'Quality',
-          auto: 'Auto',
-          getName: (level) => `${level.height}p`,
-        },
-        audio: {
-          control: true,
-          setting: true,
-          title: 'Audio',
-          auto: 'Auto',
-          getName: (track) => track.name || 'Track',
-        },
-      }),
-    ],
-
-    customType: {
-      m3u8: function (video, url, art) {
-
-        if (Hls.isSupported()) {
-
-          if (art.hls) art.hls.destroy();
-
-          const hls = new Hls({
-            enableWorker: true,
-            lowLatencyMode: true
-          });
-
-          hls.loadSource(url);
-          hls.attachMedia(video);
-
-          art.hls = hls;
-
-          art.on('destroy', () => hls.destroy());
-
-        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-          video.src = url;
-        } else {
-          art.notice.show = 'M3U8 not supported';
-        }
-      }
-    }
   });
 
+  const video = art.video;
+  const qualitySelect = document.getElementById("quality");
+
+  if (Hls.isSupported()) {
+
+    hls = new Hls({
+      enableWorker: true,
+      lowLatencyMode: true
+    });
+
+    hls.loadSource(streamUrl);
+    hls.attachMedia(video);
+
+    setupQualitySelector(hls, qualitySelect);
+
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      video.play().catch(() => {});
+    });
+
+    hls.on(Hls.Events.ERROR, (_, err) => {
+      console.log("HLS Error:", err);
+    });
+
+  } else {
+    video.src = streamUrl;
+  }
 }
 </script>
 
