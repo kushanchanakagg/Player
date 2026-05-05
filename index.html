@@ -5,59 +5,26 @@
 <title>Vyla Player Pro</title>
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/artplayer/dist/artplayer.css">
+
 <script src="https://cdn.jsdelivr.net/npm/artplayer/dist/artplayer.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/artplayer-plugin-hls-control/dist/artplayer-plugin-hls-control.js"></script>
 
 <style>
 body {
   margin:0;
   background:#0f172a;
-  font-family:system-ui;
-  color:white;
 }
-
-.container {
-  max-width:900px;
-  margin:auto;
-  padding:20px;
-}
-
-#player {
+.artplayer-app {
   width:100%;
-  height:520px;
-  background:black;
-  border-radius:12px;
-  overflow:hidden;
-}
-
-.controls {
-  margin-top:15px;
-}
-
-select {
-  background:#1e293b;
-  color:white;
-  border:none;
-  padding:6px;
-  border-radius:6px;
+  height:100vh;
 }
 </style>
 </head>
 
 <body>
 
-<div class="container">
-  <h2>🎬 Vyla Player</h2>
-
-  <div id="player"></div>
-
-  <div class="controls">
-    <label>Quality:</label>
-    <select id="quality">
-      <option value="-1">Auto</option>
-    </select>
-  </div>
-</div>
+<div class="artplayer-app"></div>
 
 <script>
 const BASE = "https://vyla-api.pages.dev";
@@ -65,92 +32,74 @@ const BASE = "https://vyla-api.pages.dev";
 const params = new URLSearchParams(location.search);
 const id = params.get("id");
 
-if (!id) {
-  document.body.innerHTML = "Missing ID";
-  throw new Error("Missing ID");
-}
+if (!id) throw new Error("Missing ID");
 
 const url = `${BASE}/api/movie?id=${id}`;
 
-let art;
-let hls;
-
-// FETCH SOURCE
 fetch(url)
   .then(r => r.json())
   .then(data => {
     const stream = BASE + data.sources[0].url;
-    initPlayer(stream);
+
+    createPlayer(stream);
   });
 
-// QUALITY FUNCTION (YOUR LOGIC FIXED)
-function setupQualitySelector(hls, selectEl) {
+function createPlayer(streamUrl) {
 
-  hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+  const art = new Artplayer({
+    container: '.artplayer-app',
+    url: streamUrl,
+    setting: true,
+    autoplay: true,
 
-    selectEl.innerHTML = '<option value="-1">Auto</option>';
+    // 🔥 IMPORTANT PART (PLUGIN)
+    plugins: [
+      artplayerPluginHlsControl({
+        quality: {
+          control: true,
+          setting: true,
+          title: 'Quality',
+          auto: 'Auto',
+          getName: level => `${level.height}P`,
+        },
+        audio: {
+          control: true,
+          setting: true,
+          title: 'Audio',
+          auto: 'Auto',
+          getName: track => track.name || 'Track',
+        },
+      }),
+    ],
 
-    data.levels.forEach((level, i) => {
-      const opt = document.createElement('option');
-      opt.value = i;
-      opt.textContent =
-        (level.height ? level.height + 'p' : 'Auto') +
-        ` (${Math.round(level.bitrate / 1000)}kbps)`;
+    customType: {
+      m3u8: function (video, url, art) {
 
-      selectEl.appendChild(opt);
-    });
+        if (Hls.isSupported()) {
 
-    selectEl.onchange = () => {
-      hls.currentLevel = parseInt(selectEl.value);
-    };
-  });
+          if (art.hls) art.hls.destroy();
 
-  hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => {
-    if (hls.autoLevelEnabled) {
-      selectEl.value = '-1';
-    } else {
-      selectEl.value = data.level;
+          const hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true
+          });
+
+          hls.loadSource(url);
+          hls.attachMedia(video);
+
+          art.hls = hls;
+
+          art.on('destroy', () => hls.destroy());
+
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          video.src = url;
+        } else {
+          art.notice.show = 'M3U8 not supported';
+        }
+      }
     }
   });
-}
 
-// PLAYER INIT
-function initPlayer(streamUrl) {
-
-  art = new Artplayer({
-    container: '#player',
-    url: streamUrl,
-    autoplay: true,
-    fullscreen: true,
-    setting: true,
-  });
-
-  const video = art.video;
-  const qualitySelect = document.getElementById("quality");
-
-  if (Hls.isSupported()) {
-
-    hls = new Hls({
-      enableWorker: true,
-      lowLatencyMode: true
-    });
-
-    hls.loadSource(streamUrl);
-    hls.attachMedia(video);
-
-    setupQualitySelector(hls, qualitySelect);
-
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      video.play().catch(() => {});
-    });
-
-    hls.on(Hls.Events.ERROR, (_, err) => {
-      console.log("HLS Error:", err);
-    });
-
-  } else {
-    video.src = streamUrl;
-  }
 }
 </script>
 
