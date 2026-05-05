@@ -26,6 +26,25 @@ body {
   height:500px;
   border-radius:12px;
   overflow:hidden;
+  background:black;
+}
+
+#sources {
+  margin-top:15px;
+}
+
+button {
+  background:#1e293b;
+  border:none;
+  color:white;
+  padding:8px 12px;
+  margin:4px;
+  border-radius:6px;
+  cursor:pointer;
+}
+
+button.active {
+  background:#22c55e;
 }
 </style>
 </head>
@@ -34,7 +53,9 @@ body {
 
 <div class="container">
   <h2>🎬 Vyla Player</h2>
+
   <div id="player"></div>
+  <div id="sources"></div>
 </div>
 
 <script>
@@ -47,7 +68,7 @@ const season = params.get("season") || 1;
 const episode = params.get("episode") || 1;
 
 if (!id) {
-  document.body.innerHTML = "Missing ID";
+  document.body.innerHTML = "<h2 style='text-align:center'>❌ Missing ID</h2>";
   throw new Error("Missing ID");
 }
 
@@ -64,11 +85,40 @@ let currentIndex = 0;
 fetch(url)
   .then(r => r.json())
   .then(data => {
+    if (!data.sources?.length) throw new Error("No sources found");
+
     sources = data.sources;
+    createButtons();
     loadSource(0);
+  })
+  .catch(err => {
+    document.body.innerHTML = `<h2 style="text-align:center">${err.message}</h2>`;
   });
 
-// LOAD SOURCE
+// SOURCE BUTTONS
+function createButtons() {
+  const div = document.getElementById("sources");
+  div.innerHTML = "";
+
+  sources.forEach((s, i) => {
+    const btn = document.createElement("button");
+    btn.innerText = s.label;
+
+    btn.onclick = () => {
+      document.querySelectorAll("#sources button")
+        .forEach(b => b.classList.remove("active"));
+
+      btn.classList.add("active");
+      loadSource(i);
+    };
+
+    if (i === 0) btn.classList.add("active");
+
+    div.appendChild(btn);
+  });
+}
+
+// LOAD SOURCE (FIXED CORE)
 function loadSource(index) {
   currentIndex = index;
 
@@ -82,50 +132,69 @@ function loadSource(index) {
     url: stream,
     autoplay: true,
     fullscreen: true,
-    setting: true, // 🔥 IMPORTANT
+    setting: true,
+
+    // IMPORTANT: placeholder settings (must exist)
+    settings: [
+      {
+        html: 'Quality',
+        selector: [
+          { html: 'Auto', value: -1 }
+        ],
+        onSelect: (item) => {
+          if (hls) hls.currentLevel = item.value;
+          return item.html;
+        }
+      }
+    ]
   });
 
   const video = art.video;
 
   if (Hls.isSupported()) {
+
     hls = new Hls({
       enableWorker: true,
-      lowLatencyMode: true,
+      lowLatencyMode: true
     });
 
     hls.loadSource(stream);
     hls.attachMedia(video);
 
-    // 🔥 QUALITY INSIDE ARTPLAYER SETTINGS MENU
+    // BUILD QUALITY MENU (REAL FIX)
     hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
 
       const levels = [
         { html: 'Auto', value: -1 }
       ];
 
-      data.levels.forEach((level, i) => {
+      data.levels.forEach((l, i) => {
         levels.push({
-          html: level.height ? level.height + 'p' : 'Auto',
+          html: l.height ? `${l.height}p` : 'Auto',
           value: i
         });
       });
 
-      art.update({
-        settings: [
-          {
-            html: 'Quality',
-            selector: levels,
-            onSelect: (item) => {
-              hls.currentLevel = item.value;
-              return item.html;
-            }
+      // SAFE REPLACE SETTINGS
+      art.option.settings = [
+        {
+          html: 'Quality',
+          selector: levels,
+          onSelect: (item) => {
+            hls.currentLevel = item.value;
+            return item.html;
           }
-        ]
-      });
+        }
+      ];
 
+    });
+
+    // AUTO PLAY
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
       video.play().catch(() => {});
     });
 
+    // FAILOVER
     hls.on(Hls.Events.ERROR, (_, err) => {
       if (err.fatal && currentIndex < sources.length - 1) {
         loadSource(currentIndex + 1);
