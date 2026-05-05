@@ -15,6 +15,7 @@ body {
   margin:0;
   background:#0f172a;
 }
+
 .artplayer-app {
   width:100%;
   height:100vh;
@@ -32,7 +33,10 @@ const BASE = "https://vyla-api.pages.dev";
 const params = new URLSearchParams(location.search);
 const id = params.get("id");
 
-if (!id) throw new Error("Missing ID");
+if (!id) {
+  document.body.innerHTML = "Missing ID";
+  throw new Error("Missing ID");
+}
 
 const url = `${BASE}/api/movie?id=${id}`;
 
@@ -40,19 +44,19 @@ fetch(url)
   .then(r => r.json())
   .then(data => {
     const stream = BASE + data.sources[0].url;
-
-    createPlayer(stream);
+    initPlayer(stream);
   });
 
-function createPlayer(streamUrl) {
+function initPlayer(streamUrl) {
 
   const art = new Artplayer({
     container: '.artplayer-app',
     url: streamUrl,
-    setting: true,
     autoplay: true,
+    setting: true,
+    fullscreen: true,
 
-    // 🔥 IMPORTANT PART (PLUGIN)
+    // 🔥 PLUGIN (THIS IS WHAT FIXES QUALITY MENU INSIDE PLAYER)
     plugins: [
       artplayerPluginHlsControl({
         quality: {
@@ -60,20 +64,21 @@ function createPlayer(streamUrl) {
           setting: true,
           title: 'Quality',
           auto: 'Auto',
-          getName: level => `${level.height}P`,
+          getName: (level) => level.height ? `${level.height}P` : 'Auto',
         },
         audio: {
           control: true,
           setting: true,
           title: 'Audio',
           auto: 'Auto',
-          getName: track => track.name || 'Track',
+          getName: (track) => track.name || 'Track',
         },
       }),
     ],
 
+    // 🔥 PROPER HLS HANDLER
     customType: {
-      m3u8: function (video, url, art) {
+      m3u8(video, url, art) {
 
         if (Hls.isSupported()) {
 
@@ -81,15 +86,22 @@ function createPlayer(streamUrl) {
 
           const hls = new Hls({
             enableWorker: true,
-            lowLatencyMode: true
+            lowLatencyMode: true,
           });
+
+          art.hls = hls;
 
           hls.loadSource(url);
           hls.attachMedia(video);
 
-          art.hls = hls;
+          // IMPORTANT: ensure levels are ready
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            video.play().catch(() => {});
+          });
 
-          art.on('destroy', () => hls.destroy());
+          art.on('destroy', () => {
+            hls.destroy();
+          });
 
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
           video.src = url;
