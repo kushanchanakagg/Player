@@ -2,13 +2,10 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Vyla Player (Plyr)</title>
+<title>Vyla Player Fixed</title>
 
-<!-- Plyr -->
 <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
 <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
-
-<!-- HLS -->
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 
 <style>
@@ -48,9 +45,9 @@ button.active {
 <body>
 
 <div class="container">
-  <h2>🎬 Vyla Player</h2>
+  <h2>🎬 Vyla Player (Fixed)</h2>
 
-  <video id="video" playsinline controls></video>
+  <video id="video" controls playsinline></video>
 
   <div id="sources"></div>
 </div>
@@ -65,7 +62,7 @@ const season = params.get("season") || 1;
 const episode = params.get("episode") || 1;
 
 if (!id) {
-  document.body.innerHTML = "<h2 style='text-align:center'>❌ Missing TMDB ID</h2>";
+  document.body.innerHTML = "<h2 style='text-align:center'>❌ Missing ID</h2>";
   throw new Error("Missing ID");
 }
 
@@ -79,12 +76,13 @@ const sourcesDiv = document.getElementById("sources");
 let player = new Plyr(video);
 let hls = null;
 let sources = [];
+let currentIndex = 0;
 
 // FETCH SOURCES
 fetch(url)
   .then(r => r.json())
   .then(data => {
-    if (!data.sources?.length) throw new Error("No sources");
+    if (!data.sources?.length) throw new Error("No sources found");
 
     sources = data.sources;
     createButtons();
@@ -116,8 +114,10 @@ function createButtons() {
   });
 }
 
-// LOAD SOURCE
+// LOAD SOURCE (FIXED)
 function loadSource(index) {
+  currentIndex = index;
+
   if (hls) {
     hls.destroy();
     hls = null;
@@ -125,49 +125,36 @@ function loadSource(index) {
 
   const stream = BASE + sources[index].url;
 
+  // HLS support
   if (Hls.isSupported()) {
-    hls = new Hls();
+    hls = new Hls({
+      enableWorker: true,
+      lowLatencyMode: true
+    });
+
     hls.loadSource(stream);
     hls.attachMedia(video);
 
-    // 🔥 FIX QUALITY INSIDE PLYR
+    // FIXED QUALITY HANDLING (NO Plyr hacking)
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      const levels = hls.levels.map((l, i) => ({
-        label: l.height ? l.height + "p" : Math.round(l.bitrate/1000) + " kbps",
-        value: i
-      }));
-
-      // Inject into Plyr settings
-      player.options.quality = {
-        default: -1,
-        options: [-1, ...levels.map(l => l.value)],
-        forced: true,
-        onChange: (q) => {
-          if (q === -1) {
-            hls.currentLevel = -1;
-          } else {
-            hls.currentLevel = q;
-          }
-        }
-      };
-
-      // Reload Plyr UI
-      player.destroy();
-      player = new Plyr(video);
-
-      video.play().catch(()=>{});
+      video.play().catch(() => {});
     });
 
-    // AUTO FAILOVER
-    hls.on(Hls.Events.ERROR, (_, err) => {
-      if (err.fatal && index < sources.length - 1) {
-        loadSource(index + 1);
-      }
-    });
-
-  } else {
+  } 
+  // Safari fallback
+  else if (video.canPlayType("application/vnd.apple.mpegurl")) {
     video.src = stream;
+  } 
+  else {
+    alert("HLS not supported");
   }
+
+  // AUTO FAILOVER
+  hls?.on(Hls.Events.ERROR, (_, err) => {
+    if (err.fatal && currentIndex < sources.length - 1) {
+      loadSource(currentIndex + 1);
+    }
+  });
 }
 </script>
 
