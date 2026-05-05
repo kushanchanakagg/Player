@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Vyla Player</title>
+
+  <!-- HLS.js -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+
+  <style>
+    body { font-family: Arial; background:#000; color:#fff; margin:0; }
+    video { width:100%; max-height:70vh; background:#000; }
+    .controls { padding:10px; }
+    button { margin:5px; padding:8px 12px; cursor:pointer; }
+    select { padding:6px; }
+  </style>
+</head>
+<body>
+
+<video id="video" controls></video>
+
+<div class="controls">
+  <div id="sources"></div>
+  <br>
+  <label>Quality:</label>
+  <select id="quality">
+    <option value="-1">Auto</option>
+  </select>
+
+  <br><br>
+
+  <!-- Subtitle upload -->
+  <input type="file" id="subtitleUpload" accept=".vtt">
+</div>
+
+<script>
+const BASE = "https://vyla-api.pages.dev";
+const params = new URLSearchParams(location.search);
+
+const tmdbId = params.get("id") || 550;
+const isTv = params.get("type") === "tv";
+const season = params.get("season") || 1;
+const episode = params.get("episode") || 1;
+
+const url = isTv
+  ? `${BASE}/api/tv?id=${tmdbId}&season=${season}&episode=${episode}`
+  : `${BASE}/api/movie?id=${tmdbId}`;
+
+const video = document.getElementById("video");
+const sourcesDiv = document.getElementById("sources");
+const qualitySelect = document.getElementById("quality");
+const subtitleUpload = document.getElementById("subtitleUpload");
+
+let hls = null;
+
+// Load sources from API
+fetch(url)
+  .then(r => r.json())
+  .then(data => {
+    if (!data.sources || !data.sources.length) {
+      alert("No sources found");
+      return;
+    }
+
+    const sources = data.sources;
+
+    function loadSource(index) {
+      if (hls) hls.destroy();
+
+      if (Hls.isSupported()) {
+        hls = new Hls();
+
+        hls.loadSource(BASE + sources[index].url);
+        hls.attachMedia(video);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+          qualitySelect.innerHTML = '<option value="-1">Auto</option>';
+
+          data.levels.forEach((l, i) => {
+            qualitySelect.innerHTML += `<option value="${i}">${l.height}p</option>`;
+          });
+
+          video.play().catch(() => {});
+        });
+
+        hls.on(Hls.Events.ERROR, (_, err) => {
+          if (err.fatal && index < sources.length - 1) {
+            loadSource(index + 1);
+          }
+        });
+
+      } else {
+        video.src = BASE + sources[index].url;
+      }
+    }
+
+    // Create source buttons
+    sources.forEach((s, i) => {
+      const btn = document.createElement("button");
+      btn.innerText = s.label;
+      btn.onclick = () => loadSource(i);
+      sourcesDiv.appendChild(btn);
+    });
+
+    loadSource(0);
+  });
+
+// Quality change
+qualitySelect.onchange = () => {
+  if (hls) {
+    hls.currentLevel = Number(qualitySelect.value);
+  }
+};
+
+// Subtitle upload (custom)
+subtitleUpload.onchange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const url = URL.createObjectURL(file);
+
+  const track = document.createElement("track");
+  track.kind = "subtitles";
+  track.label = file.name;
+  track.src = url;
+  track.default = true;
+
+  video.appendChild(track);
+};
+</script>
+
+</body>
+</html>
