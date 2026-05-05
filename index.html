@@ -2,102 +2,103 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Vyla Player Fixed</title>
+<title>Stable Player</title>
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/artplayer/dist/artplayer.css">
 
 <script src="https://cdn.jsdelivr.net/npm/artplayer/dist/artplayer.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-<script src="https://cdn.jsdelivr.net/npm/artplayer-plugin-hls-control/dist/artplayer-plugin-hls-control.js"></script>
 
 <style>
 body { margin:0; background:#0f172a; }
-.artplayer-app { width:100%; height:100vh; }
+#player { width:100%; height:100vh; }
+.controls {
+  position:fixed;
+  top:10px;
+  right:10px;
+  z-index:999;
+}
+select {
+  background:#1e293b;
+  color:white;
+  padding:6px;
+}
 </style>
 </head>
 
 <body>
 
-<div class="artplayer-app"></div>
+<div id="player"></div>
+
+<div class="controls">
+  <select id="quality">
+    <option value="-1">Auto</option>
+  </select>
+</div>
 
 <script>
 const BASE = "https://vyla-api.pages.dev";
 
 const id = new URLSearchParams(location.search).get("id");
-if (!id) throw new Error("Missing ID");
+
+let hls;
+let art;
 
 fetch(`${BASE}/api/movie?id=${id}`)
   .then(r => r.json())
   .then(data => {
-    const stream = BASE + data.sources[0].url;
-
-    createPlayer(stream);
+    init(BASE + data.sources[0].url);
   });
 
-function createPlayer(streamUrl) {
+function setupQualitySelector(hls, selectEl) {
 
-  const art = new Artplayer({
-    container: '.artplayer-app',
-    url: streamUrl,
+  hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+
+    selectEl.innerHTML = '<option value="-1">Auto</option>';
+
+    data.levels.forEach((level, i) => {
+      const opt = document.createElement("option");
+      opt.value = i;
+      opt.textContent = level.height ? `${level.height}p` : "Auto";
+      selectEl.appendChild(opt);
+    });
+
+    selectEl.onchange = () => {
+      hls.currentLevel = Number(selectEl.value);
+    };
+  });
+
+  hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => {
+    selectEl.value = hls.autoLevelEnabled ? -1 : data.level;
+  });
+}
+
+function init(url) {
+
+  art = new Artplayer({
+    container: '#player',
+    url,
     autoplay: true,
-    setting: true,
-
-    plugins: [
-      artplayerPluginHlsControl({
-        quality: {
-          control: true,
-          setting: true,
-          title: 'Quality',
-          auto: 'Auto',
-          getName: level => level.height ? `${level.height}P` : 'Auto',
-        },
-        audio: {
-          control: true,
-          setting: true,
-          title: 'Audio',
-          auto: 'Auto',
-          getName: track => track.name || 'Track',
-        },
-      }),
-    ],
-
-    customType: {
-      m3u8(video, url, art) {
-
-        // IMPORTANT: clean previous instance
-        if (art.hls) {
-          art.hls.destroy();
-          art.hls = null;
-        }
-
-        if (Hls.isSupported()) {
-
-          const hls = new Hls({
-            enableWorker: true,
-            lowLatencyMode: true,
-          });
-
-          hls.loadSource(url);
-          hls.attachMedia(video);
-
-          // ⚠️ IMPORTANT: attach BEFORE plugin reads it
-          art.hls = hls;
-
-          hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            video.play().catch(() => {});
-          });
-
-          art.on('destroy', () => hls.destroy());
-
-        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-          video.src = url;
-        } else {
-          art.notice.show = 'M3U8 not supported';
-        }
-      }
-    }
+    setting: false
   });
 
+  const video = art.video;
+  const select = document.getElementById("quality");
+
+  if (Hls.isSupported()) {
+
+    hls = new Hls({
+      enableWorker: true
+    });
+
+    hls.loadSource(url);
+    hls.attachMedia(video);
+
+    setupQualitySelector(hls, select);
+
+  } else {
+    video.src = url;
+  }
 }
 </script>
 
