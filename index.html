@@ -2,10 +2,9 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Vyla Player Fixed</title>
+<title>Vyla Player (Artplayer)</title>
 
-<link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
-<script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/artplayer/dist/artplayer.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 
 <style>
@@ -20,6 +19,13 @@ body {
   max-width:900px;
   margin:auto;
   padding:20px;
+}
+
+#player {
+  width:100%;
+  height:500px;
+  border-radius:12px;
+  overflow:hidden;
 }
 
 #sources {
@@ -45,9 +51,9 @@ button.active {
 <body>
 
 <div class="container">
-  <h2>🎬 Vyla Player (Fixed)</h2>
+  <h2>🎬 Vyla Player (Artplayer)</h2>
 
-  <video id="video" controls playsinline></video>
+  <div id="player"></div>
 
   <div id="sources"></div>
 </div>
@@ -70,13 +76,50 @@ const url = isTv
   ? `${BASE}/api/tv?id=${id}&season=${season}&episode=${episode}`
   : `${BASE}/api/movie?id=${id}`;
 
-const video = document.getElementById("video");
-const sourcesDiv = document.getElementById("sources");
-
-let player = new Plyr(video);
-let hls = null;
+let art;
+let hls;
 let sources = [];
 let currentIndex = 0;
+
+// INIT ARTPLAYER (ONLY ONCE)
+function createPlayer(streamUrl) {
+  if (art) art.destroy();
+
+  art = new Artplayer({
+    container: '#player',
+    url: streamUrl,
+    autoplay: true,
+    volume: 0.8,
+    isLive: false,
+    muted: false,
+    playbackRate: true,
+    fullscreen: true,
+  });
+
+  // HLS support
+  if (Hls.isSupported()) {
+    const video = art.video;
+
+    hls = new Hls({
+      enableWorker: true,
+      lowLatencyMode: true
+    });
+
+    hls.loadSource(streamUrl);
+    hls.attachMedia(video);
+
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      video.play().catch(() => {});
+    });
+
+    // auto failover
+    hls.on(Hls.Events.ERROR, (_, err) => {
+      if (err.fatal && currentIndex < sources.length - 1) {
+        loadSource(currentIndex + 1);
+      }
+    });
+  }
+}
 
 // FETCH SOURCES
 fetch(url)
@@ -94,7 +137,8 @@ fetch(url)
 
 // SOURCE BUTTONS
 function createButtons() {
-  sourcesDiv.innerHTML = "";
+  const div = document.getElementById("sources");
+  div.innerHTML = "";
 
   sources.forEach((s, i) => {
     const btn = document.createElement("button");
@@ -110,51 +154,15 @@ function createButtons() {
 
     if (i === 0) btn.classList.add("active");
 
-    sourcesDiv.appendChild(btn);
+    div.appendChild(btn);
   });
 }
 
-// LOAD SOURCE (FIXED)
+// LOAD SOURCE
 function loadSource(index) {
   currentIndex = index;
-
-  if (hls) {
-    hls.destroy();
-    hls = null;
-  }
-
   const stream = BASE + sources[index].url;
-
-  // HLS support
-  if (Hls.isSupported()) {
-    hls = new Hls({
-      enableWorker: true,
-      lowLatencyMode: true
-    });
-
-    hls.loadSource(stream);
-    hls.attachMedia(video);
-
-    // FIXED QUALITY HANDLING (NO Plyr hacking)
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      video.play().catch(() => {});
-    });
-
-  } 
-  // Safari fallback
-  else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-    video.src = stream;
-  } 
-  else {
-    alert("HLS not supported");
-  }
-
-  // AUTO FAILOVER
-  hls?.on(Hls.Events.ERROR, (_, err) => {
-    if (err.fatal && currentIndex < sources.length - 1) {
-      loadSource(currentIndex + 1);
-    }
-  });
+  createPlayer(stream);
 }
 </script>
 
